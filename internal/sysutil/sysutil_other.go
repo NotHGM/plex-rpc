@@ -33,3 +33,6 @@ func SingleInstance() bool { return true }
 
 // Alert prints the message.
 func Alert(title, text string) { fmt.Fprintf(os.Stderr, "%s: %s\n", title, text) }
+
+// PlexAppRunning cannot tell outside Windows, so it assumes yes.
+func PlexAppRunning() bool { return true }

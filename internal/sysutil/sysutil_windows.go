@@ -5,6 +5,8 @@ package sysutil
 import (
 	"errors"
 	"os"
+	"strings"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
@@ -78,4 +80,25 @@ func Alert(title, text string) {
 	t, _ := windows.UTF16PtrFromString(title)
 	m, _ := windows.UTF16PtrFromString(text)
 	_, _ = windows.MessageBox(0, m, t, windows.MB_OK|windows.MB_ICONINFORMATION)
+}
+
+// PlexAppRunning reports whether any Plex player (Plex, Plex HTPC, Plexamp)
+// appears to be running. It errs on the side of true: any process with
+// "plex" in its name counts, and errors count as running.
+func PlexAppRunning() bool {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return true
+	}
+	defer windows.CloseHandle(snap)
+	var e windows.ProcessEntry32
+	e.Size = uint32(unsafe.Sizeof(e))
+	self := uint32(os.Getpid())
+	for err = windows.Process32First(snap, &e); err == nil; err = windows.Process32Next(snap, &e) {
+		name := strings.ToLower(windows.UTF16ToString(e.ExeFile[:]))
+		if e.ProcessID != self && strings.Contains(name, "plex") && !strings.Contains(name, "rpc") {
+			return true
+		}
+	}
+	return !errors.Is(err, windows.ERROR_NO_MORE_FILES)
 }

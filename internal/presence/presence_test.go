@@ -195,3 +195,34 @@ func TestTracker(t *testing.T) {
 		t.Errorf("new item start %d", s)
 	}
 }
+
+func TestLiveness(t *testing.T) {
+	var l Liveness
+	t0 := time.Unix(1000, 0)
+	if l.Stale("a", "playing", 1000, t0) {
+		t.Fatal("new session is not stale")
+	}
+	// Position advancing: never stale.
+	if l.Stale("a", "playing", 9000, t0.Add(25*time.Second)) || l.Stale("a", "playing", 20000, t0.Add(50*time.Second)) {
+		t.Fatal("advancing session marked stale")
+	}
+	// Frozen position while "playing": stale after StaleAfter.
+	if l.Stale("a", "playing", 20000, t0.Add(70*time.Second)) {
+		t.Fatal("stale too early")
+	}
+	if !l.Stale("a", "playing", 20000, t0.Add(50*time.Second+StaleAfter)) {
+		t.Fatal("frozen session should be stale")
+	}
+	// Paused sessions are handled by the pause timeout, not here.
+	if l.Stale("b", "paused", 5, t0) || l.Stale("b", "paused", 5, t0.Add(time.Hour)) {
+		t.Fatal("paused session marked stale")
+	}
+	// Resuming counts as activity.
+	if l.Stale("b", "playing", 5, t0.Add(time.Hour+time.Second)) {
+		t.Fatal("resumed session marked stale")
+	}
+	l.Prune(t0.Add(30 * time.Minute))
+	if _, ok := l.seen["a"]; ok {
+		t.Fatal("old session not pruned")
+	}
+}

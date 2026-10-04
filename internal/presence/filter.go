@@ -91,3 +91,11 @@ func Pick(cands []Candidate, f Filter) *Candidate {
 	}
 	return paused
 }
+
+// OnThisPC reports whether the player is this computer, regardless of the
+// player filter mode.
+func (f Filter) OnThisPC(p plex.Player) bool {
+	g := f
+	g.Mode = config.PlayerThisPC
+	return g.playerMatches(p)
+}

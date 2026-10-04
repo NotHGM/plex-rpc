@@ -100,6 +100,9 @@ Look for a line starting with `ignoring` in the log. It lists the user, player n
 - If it's this PC but wasn't recognised (some Docker or VPN setups hide the real address), also enable that option. Your phone and TV will show up too.
 - If the user isn't you, sign in with the account that owns the server.
 
+**It still shows a movie after I closed Plex.**
+If you close the app mid-playback, it never tells the server it stopped, so the server keeps listing the session as playing for a while. Plex RPC notices when the position stops moving, or when no Plex app is running on this PC, and clears the status within about 30 seconds.
+
 **The tray says "Discord isn't running".**
 Start the Discord desktop app. Plex RPC reconnects on its own. If Discord runs as administrator, Plex RPC must too, or neither can see the other.
 
