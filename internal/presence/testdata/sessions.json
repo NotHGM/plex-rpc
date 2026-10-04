@@ -1,0 +1,72 @@
+{
+  "MediaContainer": {
+    "size": 5,
+    "Metadata": [
+      {
+        "type": "episode",
+        "sessionKey": "12",
+        "ratingKey": "5521",
+        "grandparentRatingKey": "5400",
+        "guid": "plex://episode/5d9c11292df347001e3a6c5f",
+        "grandparentGuid": "plex://show/5d9c086fe9d5a1001f4d5b5a",
+        "title": "Ozymandias",
+        "parentTitle": "Season 5",
+        "grandparentTitle": "Breaking Bad",
+        "parentIndex": 5,
+        "index": 14,
+        "year": 2013,
+        "duration": 2870000,
+        "viewOffset": 600000,
+        "grandparentThumb": "/library/metadata/5400/thumb/1700000000",
+        "User": {"id": "1", "title": "NotHGM"},
+        "Player": {"address": "192.168.1.50", "machineIdentifier": "abc", "platform": "Windows", "product": "Plex for Windows", "state": "playing", "title": "GEORGE-PC", "local": true}
+      },
+      {
+        "type": "movie",
+        "sessionKey": "13",
+        "ratingKey": "901",
+        "guid": "plex://movie/5d776b59ad5437001f79c6f8",
+        "title": "Dune: Part Two",
+        "year": "2024",
+        "duration": 9960000,
+        "viewOffset": 0,
+        "Genre": [{"tag": "Science Fiction"}, {"tag": "Adventure"}, {"tag": "Drama"}],
+        "User": {"id": "8812345", "title": "friend"},
+        "Player": {"address": "192.168.1.77", "product": "Plex for Android (TV)", "state": "playing", "title": "SHIELD"}
+      },
+      {
+        "type": "track",
+        "sessionKey": "14",
+        "ratingKey": "77",
+        "parentGuid": "plex://album/5d07c174403c640290f6da8c",
+        "title": "Get Lucky",
+        "parentTitle": "Random Access Memories",
+        "grandparentTitle": "Daft Punk",
+        "originalTitle": "Daft Punk feat. Pharrell Williams",
+        "parentYear": 2013,
+        "duration": 369000,
+        "viewOffset": 30000,
+        "User": {"id": "1", "title": "NotHGM"},
+        "Player": {"address": "10.0.0.5", "product": "Plexamp", "state": "paused", "title": "iPhone"}
+      },
+      {
+        "type": "movie",
+        "sessionKey": "15",
+        "ratingKey": "902",
+        "title": "Home Video",
+        "duration": 60000,
+        "viewOffset": 1000,
+        "User": {"id": "1", "title": "NotHGM"},
+        "Player": {"address": "172.17.0.1", "product": "Plex HTPC", "state": "paused", "title": "george-pc"}
+      },
+      {
+        "type": "photo",
+        "sessionKey": "16",
+        "ratingKey": "903",
+        "title": "IMG_0001",
+        "User": {"id": "1", "title": "NotHGM"},
+        "Player": {"address": "192.168.1.50", "product": "Plex for Windows", "state": "playing", "title": "GEORGE-PC"}
+      }
+    ]
+  }
+}
