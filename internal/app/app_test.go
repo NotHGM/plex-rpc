@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/NotHGM/plex-rpc/internal/config"
+	"github.com/NotHGM/plex-rpc/internal/plex"
+	"github.com/NotHGM/plex-rpc/internal/presence"
 )
 
 const sessionsJSON = `{"MediaContainer":{"Metadata":[{
@@ -63,11 +65,17 @@ func TestTickSendsActivity(t *testing.T) {
 	})
 
 	a := New(store, "test", "", dir)
+	a.plex.HTTP.Transport = localOnly{pms.URL}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	a.tick(ctx)
-	first := <-activities
+	var first map[string]any
+	select {
+	case first = <-activities:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("no activity sent; status %+v", a.Status())
+	}
 	if first["details"] != "Heat" || first["type"] != float64(3) {
 		t.Fatalf("activity %v", first)
 	}
@@ -150,4 +158,62 @@ func fakeDiscord(t *testing.T) chan map[string]any {
 		}
 	}()
 	return out
+}
+
+// localOnly sends every request to the fake server so tests never reach
+// plex.tv.
+type localOnly struct{ target string }
+
+func (l localOnly) RoundTrip(req *http.Request) (*http.Response, error) {
+	r := req.Clone(req.Context())
+	u := *req.URL
+	u.Scheme, u.Host = "http", strings.TrimPrefix(l.target, "http://")
+	r.URL, r.Host = &u, u.Host
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+func TestRememberDevicesOnlyForHomeAccounts(t *testing.T) {
+	dir := t.TempDir()
+	store, err := config.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = store.Update(func(c *config.Config) {
+		c.AccountID, c.AccountName = 100, "owner"
+		c.KnownAccounts = []config.Account{{ID: 100, Title: "owner", Admin: true}, {ID: 7, Title: "Kids"}}
+	})
+	a := New(store, "test", "", dir)
+	notified := 0
+	a.OnKnownChange(func() { notified++ })
+
+	srv := plex.Server{MachineID: "m", Owned: true}
+	session := func(userID, user, device, name string) presence.Candidate {
+		var s plex.Session
+		s.Type = "movie"
+		s.User = plex.SessionUser{ID: userID, Title: user}
+		s.Player = plex.Player{MachineIdentifier: device, Title: name, Product: "Plex for PlayStation", Address: "192.0.2.50"}
+		return presence.Candidate{Server: srv, Session: s}
+	}
+	cands := []presence.Candidate{
+		session("1", "owner", "ps5", "PS5"),          // owner
+		session("7", "Kids", "tv", "Bedroom TV"),     // Home user, not shared
+		session("555", "friend", "shield", "Shield"), // friend: never remembered
+	}
+	a.rememberDevices(cands, a.filter(store.Get()))
+
+	got := map[string]bool{}
+	for _, d := range store.Get().KnownDevices {
+		got[d.ID] = true
+	}
+	if !got["ps5"] || !got["tv"] || got["shield"] || len(got) != 2 {
+		t.Fatalf("known devices %v", got)
+	}
+	if notified != 1 {
+		t.Errorf("notified %d times", notified)
+	}
+	// Seeing them again straight away does not rewrite the config.
+	a.rememberDevices(cands, a.filter(store.Get()))
+	if notified != 1 {
+		t.Errorf("re-notified without changes")
+	}
 }

@@ -2,6 +2,7 @@ package plex
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -79,4 +80,33 @@ func (c *Client) CurrentUser(ctx context.Context, token string) (*User, error) {
 		return nil, err
 	}
 	return &u, nil
+}
+
+// HomeUser is a member of the account's Plex Home, including managed users.
+type HomeUser struct {
+	ID       int64  `json:"id"`
+	Title    string `json:"title"`
+	Username string `json:"username"`
+	Admin    bool   `json:"admin"`
+}
+
+// HomeUsers lists the Plex Home members. Accounts without a Plex Home get
+// an error or an empty list.
+func (c *Client) HomeUsers(ctx context.Context, token string) ([]HomeUser, error) {
+	var raw json.RawMessage
+	if err := c.doJSON(ctx, http.MethodGet, "https://clients.plex.tv/api/v2/home/users", token, &raw); err != nil {
+		return nil, err
+	}
+	// The endpoint has returned both a bare array and {"users": [...]}.
+	var users []HomeUser
+	if err := json.Unmarshal(raw, &users); err == nil {
+		return users, nil
+	}
+	var wrapped struct {
+		Users []HomeUser `json:"users"`
+	}
+	if err := json.Unmarshal(raw, &wrapped); err != nil {
+		return nil, err
+	}
+	return wrapped.Users, nil
 }

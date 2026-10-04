@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NotHGM/plex-rpc/internal/config"
 	"github.com/NotHGM/plex-rpc/internal/discord"
 	"github.com/NotHGM/plex-rpc/internal/plex"
 )
@@ -31,12 +30,11 @@ func loadCandidates(t *testing.T) []Candidate {
 
 func thisPC() Filter {
 	return Filter{
-		Mode:         config.PlayerThisPC,
-		AccountID:    4242,
-		AccountNames: []string{"nothgm", "NotHGM"},
-		LocalIPs:     map[string]bool{"192.168.1.50": true},
-		Hostname:     "GEORGE-PC",
-		Movies:       true, Episodes: true, Music: true,
+		Accounts: []Account{{ID: 4242, Names: []string{"nothgm", "NotHGM"}, Owner: true}},
+		ThisPC:   true,
+		LocalIPs: map[string]bool{"192.168.1.50": true},
+		Hostname: "GEORGE-PC",
+		Movies:   true, Episodes: true, Music: true,
 	}
 }
 
@@ -69,9 +67,9 @@ func TestFilter(t *testing.T) {
 		}
 	}
 
-	f.Mode = config.PlayerAny
+	f.AllDevices = true
 	if !f.Match(c[2]) {
-		t.Error("any-device mode should include the phone")
+		t.Error("all-devices mode should include the phone")
 	}
 	f.Music = false
 	if f.Match(c[2]) {
@@ -82,9 +80,46 @@ func TestFilter(t *testing.T) {
 	shared := c[0]
 	shared.Server.Owned = false
 	f = thisPC()
-	f.AccountNames = nil
+	f.Accounts[0].Names = nil
 	if f.Match(shared) {
 		t.Error("local id 1 should only mean 'me' on an owned server")
+	}
+}
+
+func TestFilterDevicesAndAccounts(t *testing.T) {
+	c := loadCandidates(t)
+	phone := c[2] // owner, Plexamp on an iPhone
+	phone.Session.Player.MachineIdentifier = "iphone-1"
+	friend := c[1] // user 8812345 on a Shield
+	friend.Session.Player.MachineIdentifier = "shield-1"
+
+	f := thisPC()
+	if f.Match(phone) {
+		t.Fatal("phone not selected yet")
+	}
+	f.Devices = map[string]bool{"iphone-1": true, "shield-1": true}
+	if !f.Match(phone) {
+		t.Error("selected device should match")
+	}
+	if f.Match(friend) {
+		t.Error("selected device but account not shared")
+	}
+	f.Accounts = append(f.Accounts, Account{ID: 8812345})
+	if !f.Match(friend) {
+		t.Error("shared Home user on a selected device should match")
+	}
+
+	// This PC unticked: only the selected devices.
+	f.ThisPC = false
+	if f.Match(c[0]) {
+		t.Error("this PC should be excluded")
+	}
+
+	// No accounts: nothing.
+	f.Accounts = nil
+	f.AllDevices = true
+	if f.Match(c[0]) || f.Match(phone) {
+		t.Error("no shared accounts should match nothing")
 	}
 }
 

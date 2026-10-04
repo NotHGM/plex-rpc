@@ -9,15 +9,30 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 )
 
-// Player filter modes.
-const (
-	PlayerThisPC = "this_pc"
-	PlayerAny    = "any"
-)
+// Device is a Plex player that has been seen playing on one of the shared
+// accounts. Devices are remembered so they can be picked in the tray.
+type Device struct {
+	ID       string    `json:"id"` // Plex machine identifier
+	Name     string    `json:"name"`
+	Product  string    `json:"product,omitempty"`
+	LastSeen time.Time `json:"last_seen"`
+}
+
+// Account is a plex.tv account in the user's Plex Home (the main account
+// and its managed or local users).
+type Account struct {
+	ID    int64  `json:"id"`
+	Title string `json:"title"`
+	Admin bool   `json:"admin,omitempty"`
+}
+
+// maxKnownDevices bounds the remembered device list.
+const maxKnownDevices = 25
 
 // Config is the on-disk settings file. Fields are exported for JSON; use the
 // Store methods to read and change them safely from several goroutines.
@@ -39,8 +54,23 @@ type Config struct {
 	// instead of discovering owned servers through plex.tv.
 	ServerURL string `json:"server_url"`
 
-	// PlayerFilter is "this_pc" (only playback on this computer) or "any".
-	PlayerFilter string `json:"player_filter"`
+	// ShareThisPC shares playback from the Plex app on this computer.
+	ShareThisPC bool `json:"share_this_pc"`
+	// ShareAllDevices shares playback from every device.
+	ShareAllDevices bool `json:"share_all_devices"`
+	// ShareDevices lists the machine identifiers of other devices to share.
+	ShareDevices []string `json:"share_devices"`
+	// ShareAccounts lists the plex.tv account ids whose playback counts as
+	// yours. Unset (null) means only the signed-in account.
+	ShareAccounts []int64 `json:"share_accounts"`
+
+	// KnownDevices and KnownAccounts feed the tray menus.
+	KnownDevices  []Device  `json:"known_devices,omitempty"`
+	KnownAccounts []Account `json:"known_accounts,omitempty"`
+
+	// PlayerFilter is the v0.1 setting ("this_pc" or "any"). It is migrated
+	// to ShareAllDevices on load.
+	PlayerFilter string `json:"player_filter,omitempty"`
 	// ClearAfterPauseMinutes clears the presence after being paused this long.
 	// 0 clears immediately on pause, -1 never clears.
 	ClearAfterPauseMinutes int `json:"clear_after_pause_minutes"`
@@ -61,7 +91,7 @@ type Config struct {
 
 func defaults() Config {
 	return Config{
-		PlayerFilter:           PlayerThisPC,
+		ShareThisPC:            true,
 		ClearAfterPauseMinutes: 5,
 		ShowButtons:            true,
 		ShowMusic:              true,
@@ -138,9 +168,10 @@ func (s *Store) load() error {
 }
 
 func (s *Store) normalize(c *Config) {
-	if c.PlayerFilter != PlayerAny {
-		c.PlayerFilter = PlayerThisPC
+	if c.PlayerFilter == "any" {
+		c.ShareAllDevices = true
 	}
+	c.PlayerFilter = ""
 	if c.PollIntervalSeconds < 1 {
 		c.PollIntervalSeconds = 1
 	}
@@ -224,4 +255,66 @@ func (s *Store) SetToken(token string) error {
 		}
 	}
 	return s.Update(func(c *Config) { c.PlexToken = enc })
+}
+
+// SharedAccounts returns the account ids whose playback is shown.
+func (c *Config) SharedAccounts() []int64 {
+	if c.ShareAccounts == nil {
+		return []int64{c.AccountID} // 0 when the account is unknown; still means "me"
+	}
+	return c.ShareAccounts
+}
+
+// SetAccountShared adds or removes an account from SharedAccounts.
+func (c *Config) SetAccountShared(id int64, on bool) {
+	ids := slices.Clone(c.SharedAccounts())
+	ids = slices.DeleteFunc(ids, func(v int64) bool { return v == id })
+	if on {
+		ids = append(ids, id)
+	}
+	if ids == nil {
+		ids = []int64{} // keep "nobody" distinct from the default
+	}
+	c.ShareAccounts = ids
+}
+
+// SetDeviceShared adds or removes a device from ShareDevices.
+func (c *Config) SetDeviceShared(id string, on bool) {
+	c.ShareDevices = slices.DeleteFunc(c.ShareDevices, func(v string) bool { return v == id })
+	if on {
+		c.ShareDevices = append(c.ShareDevices, id)
+	}
+}
+
+// RememberDevice records a device seen playing. It reports whether the list
+// changed enough to be worth saving (new device, renamed, or last seen more
+// than an hour ago).
+func (c *Config) RememberDevice(d Device) bool {
+	for i, k := range c.KnownDevices {
+		if k.ID != d.ID {
+			continue
+		}
+		if k.Name == d.Name && k.Product == d.Product && d.LastSeen.Sub(k.LastSeen) < time.Hour {
+			return false
+		}
+		c.KnownDevices[i] = d
+		return true
+	}
+	c.KnownDevices = append(c.KnownDevices, d)
+	if len(c.KnownDevices) > maxKnownDevices {
+		// Drop the device seen longest ago that is not selected.
+		oldest := -1
+		for i, k := range c.KnownDevices {
+			if slices.Contains(c.ShareDevices, k.ID) {
+				continue
+			}
+			if oldest < 0 || k.LastSeen.Before(c.KnownDevices[oldest].LastSeen) {
+				oldest = i
+			}
+		}
+		if oldest >= 0 {
+			c.KnownDevices = slices.Delete(c.KnownDevices, oldest, oldest+1)
+		}
+	}
+	return true
 }

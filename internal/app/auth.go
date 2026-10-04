@@ -61,6 +61,9 @@ func (a *App) signInFlow(ctx context.Context) error {
 		return err
 	}
 	if err := a.store.Update(func(c *config.Config) {
+		if c.AccountID != user.ID {
+			c.ShareAccounts, c.KnownAccounts = nil, nil
+		}
 		c.AccountID, c.AccountName, c.AccountTitle = user.ID, user.Username, user.Title
 	}); err != nil {
 		return err
@@ -77,9 +80,11 @@ func (a *App) SignOut() {
 	}
 	_ = a.store.Update(func(c *config.Config) {
 		c.AccountID, c.AccountName, c.AccountTitle = 0, "", ""
+		c.ShareAccounts, c.KnownAccounts = nil, nil
 	})
 	log.Printf("signed out")
 	a.requestReset()
+	a.notifyKnown()
 	a.Wake()
 }
 

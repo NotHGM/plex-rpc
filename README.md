@@ -30,9 +30,9 @@ Plex RPC sits in your system tray and shows what you're playing in Plex on your 
 - **Works with the Plex desktop app.** Plex for Windows and Plex HTPC, no browser extension, no Plex Pass.
 - **Real posters.** Artwork comes from Plex's public metadata service, so your server is never exposed. Music falls back to iTunes cover art.
 - **Progress bar** that stays in sync when you pause, seek or skip.
-- **Only you, only this PC.** Other people streaming from your server are ignored, and so is your TV unless you want it included.
+- **You choose what counts.** By default only your account on this PC is shared. Tick your PS5, TV or phone under **Devices**, and your Plex Home users under **Accounts**. Friends streaming from your server are never shown.
 - **Sign in with Plex** in your browser. No token copying, no server address to type.
-- **Tray app** with a pause switch, per-media toggles and *Start with Windows*.
+- **Tray app** with a pause switch, device and account pickers, per-media toggles and *Start with Windows*.
 - A single small `.exe` with no installer and no runtime to install.
 
 ## Setup
@@ -56,13 +56,25 @@ The Plex desktop app has no local API. It does, however, report playback to your
 
 Because of this, Plex RPC needs to be signed in to the account that **owns** the server. Only the owner can read the session list.
 
+### Devices and accounts
+
+The tray has two pickers:
+
+- **Devices**: *This PC* is on by default. Any other device that someone in your Plex Home plays on, such as a PS5, TV or phone, is added to this list the first time it plays something, so you can tick it. *All devices* shares everything.
+- **Accounts**: lists your main account and your Plex Home users, including managed users. Tick the ones whose playback should count as yours.
+
+Something is shown only if **both** match: a ticked account, playing on a ticked device. Your PC still has to be on with Plex RPC and Discord running, even when the playback is on another device.
+
 ## Settings
 
 The tray menu covers the common options. Everything lives in `%APPDATA%\plex-rpc\config.json` (tray → *Open settings folder*). Edits are picked up automatically.
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `player_filter` | `"this_pc"` | `"this_pc"` shows only playback on this computer. `"any"` also includes your TV, phone and other devices. |
+| `share_this_pc` | `true` | Share playback from the Plex app on this computer. |
+| `share_devices` | `[]` | Machine IDs of other devices to share. Easiest to set from tray → *Devices*. |
+| `share_all_devices` | `false` | Share every device, including ones not in the list yet. |
+| `share_accounts` | `null` | plex.tv account IDs whose playback counts as yours. `null` means only the signed-in account. Easiest to set from tray → *Accounts*. |
 | `clear_after_pause_minutes` | `5` | Hide the presence after being paused this long. `0` hides it on pause, `-1` never hides it. |
 | `show_movies` / `show_episodes` / `show_music` | `true` | Choose what gets shared. |
 | `show_buttons` | `true` | Add IMDb / TMDB buttons. Other people see them, you don't. |
@@ -96,9 +108,9 @@ Start with the log: tray → *Open settings folder* → `plex-rpc.log`.
 
 **Nothing shows up while I'm playing.**
 Look for a line starting with `ignoring` in the log. It lists the user, player name and address the server reported.
-- If the player is a different device, enable **Show playback from all my devices**.
+- If the player is a different device, tick it under **Devices**, or tick **All devices**.
 - If it's this PC but wasn't recognised (some Docker or VPN setups hide the real address), also enable that option. Your phone and TV will show up too.
-- If the user isn't you, sign in with the account that owns the server.
+- If the user is one of your Plex Home users, tick them under **Accounts**. Otherwise sign in with the account that owns the server.
 
 **It still shows a movie after I closed Plex.**
 If you close the app mid-playback, it never tells the server it stopped, so the server keeps listing the session as playing for a while. Plex RPC notices when the position stops moving, or when no Plex app is running on this PC, and clears the status within about 30 seconds.

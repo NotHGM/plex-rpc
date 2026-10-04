@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -53,12 +54,13 @@ type App struct {
 
 	wake chan struct{}
 
-	mu        sync.Mutex
-	status    Status
-	listeners []func(Status)
-	signIn    context.CancelFunc
-	signInGen int
-	reset     bool
+	mu             sync.Mutex
+	status         Status
+	listeners      []func(Status)
+	knownListeners []func()
+	signIn         context.CancelFunc
+	signInGen      int
+	reset          bool
 
 	// Loop-owned state (only touched by Run).
 	discord    *discord.Client
@@ -225,6 +227,7 @@ func (a *App) tick(ctx context.Context) time.Duration {
 		for _, s := range servers {
 			log.Printf("plex: using server %q at %s", s.Name, s.URI)
 		}
+		a.refreshAccounts(ctx, token)
 	}
 
 	cands, ok := a.poll(ctx)
@@ -237,6 +240,7 @@ func (a *App) tick(ctx context.Context) time.Duration {
 	a.failures = 0
 
 	filter := a.filter(cfg)
+	a.rememberDevices(cands, filter)
 	a.logIgnored(cands, filter)
 	pick := presence.Pick(a.dropGhosts(cands, filter), filter)
 
@@ -407,15 +411,131 @@ func (a *App) filter(cfg config.Config) presence.Filter {
 	if a.localIPs == nil || time.Since(a.localIPsAt) > time.Minute {
 		a.localIPs, a.localIPsAt = sysutil.LocalIPs(), time.Now()
 	}
+	devices := map[string]bool{}
+	for _, id := range cfg.ShareDevices {
+		devices[id] = true
+	}
 	return presence.Filter{
-		Mode:         cfg.PlayerFilter,
-		AccountID:    cfg.AccountID,
-		AccountNames: []string{cfg.AccountName, cfg.AccountTitle},
-		LocalIPs:     a.localIPs,
-		Hostname:     sysutil.Hostname(),
-		Movies:       cfg.ShowMovies,
-		Episodes:     cfg.ShowEpisodes,
-		Music:        cfg.ShowMusic,
+		Accounts:   accountsFor(cfg, cfg.SharedAccounts()),
+		ThisPC:     cfg.ShareThisPC,
+		AllDevices: cfg.ShareAllDevices,
+		Devices:    devices,
+		LocalIPs:   a.localIPs,
+		Hostname:   sysutil.Hostname(),
+		Movies:     cfg.ShowMovies,
+		Episodes:   cfg.ShowEpisodes,
+		Music:      cfg.ShowMusic,
+	}
+}
+
+// accountsFor turns account ids into filter accounts.
+func accountsFor(cfg config.Config, ids []int64) []presence.Account {
+	var accounts []presence.Account
+	for _, id := range ids {
+		acc := presence.Account{ID: id}
+		if id == cfg.AccountID {
+			acc.Owner = true
+			acc.Names = []string{cfg.AccountName, cfg.AccountTitle}
+		} else {
+			for _, k := range cfg.KnownAccounts {
+				if k.ID == id {
+					acc.Names = []string{k.Title}
+				}
+			}
+		}
+		accounts = append(accounts, acc)
+	}
+	return accounts
+}
+
+// rememberDevices records the devices anyone in the Plex Home plays on
+// (not friends the server is shared with), so they can be ticked in the
+// tray's Devices menu.
+func (a *App) rememberDevices(cands []presence.Candidate, f presence.Filter) {
+	cfg := a.store.Get()
+	home := []int64{cfg.AccountID}
+	for _, k := range cfg.KnownAccounts {
+		if k.ID != cfg.AccountID {
+			home = append(home, k.ID)
+		}
+	}
+	f.Accounts = accountsFor(cfg, home)
+	now := time.Now()
+	var seen []config.Device
+	for _, c := range cands {
+		p := c.Session.Player
+		if p.MachineIdentifier == "" || f.OnThisPC(p) || !f.UserMatches(c) {
+			continue
+		}
+		d := config.Device{ID: p.MachineIdentifier, Name: p.Title, Product: p.Product, LastSeen: now}
+		if d.Name == "" {
+			d.Name = p.Product
+		}
+		if cfg.RememberDevice(d) {
+			seen = append(seen, d)
+		}
+	}
+	if len(seen) == 0 {
+		return
+	}
+	if err := a.store.Update(func(c *config.Config) {
+		for _, d := range seen {
+			c.RememberDevice(d)
+		}
+	}); err != nil {
+		log.Printf("config: %v", err)
+		return
+	}
+	a.notifyKnown()
+}
+
+// refreshAccounts reloads the Plex Home member list for the Accounts menu.
+func (a *App) refreshAccounts(ctx context.Context, token string) {
+	cfg := a.store.Get()
+	known := []config.Account{{ID: cfg.AccountID, Title: firstNonEmpty(cfg.AccountTitle, cfg.AccountName), Admin: true}}
+	users, err := a.plex.HomeUsers(ctx, token)
+	if err != nil {
+		log.Printf("plex: home users: %v", err)
+	}
+	for _, u := range users {
+		if u.ID == cfg.AccountID || u.ID == 0 {
+			continue
+		}
+		known = append(known, config.Account{ID: u.ID, Title: firstNonEmpty(u.Title, u.Username), Admin: u.Admin})
+	}
+	if slices.Equal(known, cfg.KnownAccounts) {
+		return
+	}
+	if err := a.store.Update(func(c *config.Config) { c.KnownAccounts = known }); err != nil {
+		log.Printf("config: %v", err)
+		return
+	}
+	a.notifyKnown()
+}
+
+func firstNonEmpty(v ...string) string {
+	for _, s := range v {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// OnKnownChange registers a callback for when the remembered devices or
+// accounts change (to rebuild the tray menus).
+func (a *App) OnKnownChange(fn func()) {
+	a.mu.Lock()
+	a.knownListeners = append(a.knownListeners, fn)
+	a.mu.Unlock()
+}
+
+func (a *App) notifyKnown() {
+	a.mu.Lock()
+	ls := append([]func(){}, a.knownListeners...)
+	a.mu.Unlock()
+	for _, fn := range ls {
+		fn()
 	}
 }
 

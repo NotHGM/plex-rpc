@@ -5,6 +5,9 @@ import (
 	"context"
 	"log"
 	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
 	"sync/atomic"
 
 	"fyne.io/systray"
@@ -37,8 +40,17 @@ func onReady(ctx context.Context, a *app.App, version string, stop func()) {
 
 	cfg := a.Store().Get()
 	pause := systray.AddMenuItemCheckbox("Pause presence", "Stop sharing without quitting", cfg.Disabled)
-	anyDevice := systray.AddMenuItemCheckbox("Show playback from all my devices",
-		"Off: only the Plex app on this PC. On: TVs, phones and other players too", cfg.PlayerFilter == config.PlayerAny)
+
+	devicesMenu := systray.AddMenuItem("Devices", "Which players to share")
+	allDevices := devicesMenu.AddSubMenuItemCheckbox("All devices", "Share playback from every device", cfg.ShareAllDevices)
+	devicesMenu.AddSeparator()
+	thisPC := devicesMenu.AddSubMenuItemCheckbox("This PC", "The Plex app on this computer", cfg.ShareThisPC)
+	noDevices := devicesMenu.AddSubMenuItem("Other devices appear here once they play something", "")
+	noDevices.Disable()
+
+	accountsMenu := systray.AddMenuItem("Accounts", "Whose playback counts as yours")
+	noAccounts := accountsMenu.AddSubMenuItem("Sign in to see your Plex Home users", "")
+	noAccounts.Disable()
 
 	kinds := systray.AddMenuItem("Share", "")
 	movies := kinds.AddSubMenuItemCheckbox("Movies", "", cfg.ShowMovies)
@@ -54,6 +66,41 @@ func onReady(ctx context.Context, a *app.App, version string, stop func()) {
 	settings := systray.AddMenuItem("Open settings folder", "config.json and the log file")
 	systray.AddSeparator()
 	quit := systray.AddMenuItem("Quit", "")
+
+	var refresh func()
+	devices := newList(ctx, devicesMenu, func(id string, on bool) {
+		update(a, func(c *config.Config) { c.SetDeviceShared(id, on) })
+		refresh()
+	})
+	accounts := newList(ctx, accountsMenu, func(id string, on bool) {
+		n, _ := strconv.ParseInt(id, 10, 64)
+		update(a, func(c *config.Config) { c.SetAccountShared(n, on) })
+		refresh()
+	})
+	refresh = func() {
+		cfg := a.Store().Get()
+		setChecked(allDevices, cfg.ShareAllDevices)
+		setChecked(thisPC, cfg.ShareThisPC)
+		if cfg.ShareAllDevices {
+			thisPC.Disable()
+		} else {
+			thisPC.Enable()
+		}
+		devices.sync(deviceRows(cfg))
+		if devices.len() > 0 {
+			noDevices.Hide()
+		} else {
+			noDevices.Show()
+		}
+		accounts.sync(accountRows(cfg))
+		if accounts.len() > 0 {
+			noAccounts.Hide()
+		} else {
+			noAccounts.Show()
+		}
+	}
+	refresh()
+	a.OnKnownChange(refresh)
 
 	var signedIn atomic.Bool
 	a.OnStatus(func(st app.Status) {
@@ -88,15 +135,8 @@ func onReady(ctx context.Context, a *app.App, version string, stop func()) {
 
 	toggle := func(item *systray.MenuItem, apply func(c *config.Config, on bool)) {
 		on := !item.Checked()
-		if on {
-			item.Check()
-		} else {
-			item.Uncheck()
-		}
-		if err := a.Store().Update(func(c *config.Config) { apply(c, on) }); err != nil {
-			log.Printf("settings: %v", err)
-		}
-		a.Wake()
+		setChecked(item, on)
+		update(a, func(c *config.Config) { apply(c, on) })
 	}
 
 	go func() {
@@ -104,13 +144,11 @@ func onReady(ctx context.Context, a *app.App, version string, stop func()) {
 			select {
 			case <-pause.ClickedCh:
 				toggle(pause, func(c *config.Config, on bool) { c.Disabled = on })
-			case <-anyDevice.ClickedCh:
-				toggle(anyDevice, func(c *config.Config, on bool) {
-					c.PlayerFilter = config.PlayerThisPC
-					if on {
-						c.PlayerFilter = config.PlayerAny
-					}
-				})
+			case <-allDevices.ClickedCh:
+				toggle(allDevices, func(c *config.Config, on bool) { c.ShareAllDevices = on })
+				refresh()
+			case <-thisPC.ClickedCh:
+				toggle(thisPC, func(c *config.Config, on bool) { c.ShareThisPC = on })
 			case <-movies.ClickedCh:
 				toggle(movies, func(c *config.Config, on bool) { c.ShowMovies = on })
 			case <-episodes.ClickedCh:
@@ -127,11 +165,7 @@ func onReady(ctx context.Context, a *app.App, version string, stop func()) {
 					log.Printf("autostart: %v", err)
 					continue
 				}
-				if on {
-					autostart.Check()
-				} else {
-					autostart.Uncheck()
-				}
+				setChecked(autostart, on)
 			case <-account.ClickedCh:
 				if signedIn.Load() {
 					a.SignOut()
@@ -148,6 +182,56 @@ func onReady(ctx context.Context, a *app.App, version string, stop func()) {
 			}
 		}
 	}()
+}
+
+func update(a *app.App, fn func(c *config.Config)) {
+	if err := a.Store().Update(fn); err != nil {
+		log.Printf("settings: %v", err)
+	}
+	a.Wake()
+}
+
+func deviceRows(cfg config.Config) []row {
+	devs := slices.Clone(cfg.KnownDevices)
+	slices.SortFunc(devs, func(x, y config.Device) int { return strings.Compare(strings.ToLower(x.Name), strings.ToLower(y.Name)) })
+	rows := make([]row, 0, len(devs))
+	for _, d := range devs {
+		title := d.Name
+		if d.Product != "" && !strings.EqualFold(d.Product, d.Name) {
+			title += " (" + d.Product + ")"
+		}
+		rows = append(rows, row{
+			ID:       d.ID,
+			Title:    title,
+			Tooltip:  "Last played " + d.LastSeen.Local().Format("2 Jan 2006 15:04"),
+			Checked:  slices.Contains(cfg.ShareDevices, d.ID),
+			Disabled: cfg.ShareAllDevices,
+		})
+	}
+	return rows
+}
+
+func accountRows(cfg config.Config) []row {
+	if cfg.AccountID == 0 && cfg.AccountName == "" {
+		return nil
+	}
+	known := cfg.KnownAccounts
+	if len(known) == 0 {
+		known = []config.Account{{ID: cfg.AccountID, Title: cfg.AccountTitle, Admin: true}}
+	}
+	shared := cfg.SharedAccounts()
+	rows := make([]row, 0, len(known))
+	for _, k := range known {
+		title := k.Title
+		if title == "" {
+			title = cfg.AccountName
+		}
+		if k.ID == cfg.AccountID {
+			title += " (you)"
+		}
+		rows = append(rows, row{ID: strconv.FormatInt(k.ID, 10), Title: title, Checked: slices.Contains(shared, k.ID)})
+	}
+	return rows
 }
 
 // Quit closes the tray (call after the app loop has finished).
