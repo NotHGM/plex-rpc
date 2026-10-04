@@ -5,8 +5,6 @@ package sysutil
 import (
 	"errors"
 	"os"
-	"os/exec"
-	"syscall"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
@@ -18,10 +16,16 @@ const (
 )
 
 // OpenURL opens a link or folder with the default handler.
+//
+// ShellExecute is used rather than a helper process: a hidden helper passes
+// SW_HIDE on to Explorer, which then opens the folder invisibly.
 func OpenURL(target string) error {
-	cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", target)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	return cmd.Start()
+	verb, _ := windows.UTF16PtrFromString("open")
+	file, err := windows.UTF16PtrFromString(target)
+	if err != nil {
+		return err
+	}
+	return windows.ShellExecute(0, verb, file, nil, nil, windows.SW_SHOWNORMAL)
 }
 
 // AutostartEnabled reports whether plex-rpc starts with Windows.
