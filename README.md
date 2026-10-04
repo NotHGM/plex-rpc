@@ -132,13 +132,18 @@ Requires [Go](https://go.dev/dl/) 1.26 or newer.
 ```sh
 git clone https://github.com/NotHGM/plex-rpc
 cd plex-rpc
+DISCORD_CLIENT_ID=<your app id> scripts/build.sh
+```
+
+This writes `plex-rpc-windows-amd64.exe` and `plex-rpc-windows-arm64.exe` to `dist/`, with the icon, version info and your Discord application ID built in. Without the script, on any OS:
+
+```sh
 go generate ./cmd/plex-rpc        # embed icon + version info (optional)
-GOOS=windows GOARCH=amd64 go build -ldflags "-H windowsgui -s -w" -o plex-rpc.exe ./cmd/plex-rpc
+GOOS=windows GOARCH=amd64 go build -ldflags "-H windowsgui -s -w -X main.defaultClientID=<your app id>" -o plex-rpc.exe ./cmd/plex-rpc
 ```
 
 On Windows PowerShell, set the variables first with `$env:GOOS="windows"; $env:GOARCH="amd64"`.
 
-- Add `-X main.defaultClientID=<your app id>` to `-ldflags` to bake in a Discord application ID.
 - `go test ./...` runs the test suite, which includes an end-to-end test against a fake Plex server and a fake Discord client.
 - `go run ./cmd/plex-rpc -headless` runs without the tray and logs to the console. This works on Linux too.
 - `go run ./tools/genicon` regenerates every icon and Discord asset from code.
