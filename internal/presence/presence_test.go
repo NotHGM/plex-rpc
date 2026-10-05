@@ -138,7 +138,7 @@ func TestPickPrefersPlaying(t *testing.T) {
 
 func TestBuildEpisode(t *testing.T) {
 	s := loadCandidates(t)[0].Session
-	a := Build(s, Extras{Poster: "https://metadata-static.plex.tv/x.jpg"}, 1_000_000)
+	a := Build(s, Extras{Poster: "https://metadata-static.plex.tv/x.jpg"}, 1_000_000, false)
 	if a.Type != discord.TypeWatching || a.StatusDisplayType != discord.DisplayDetails {
 		t.Errorf("type %d display %d", a.Type, a.StatusDisplayType)
 	}
@@ -156,9 +156,23 @@ func TestBuildEpisode(t *testing.T) {
 	}
 }
 
+func TestBuildPausedHasNoProgressBar(t *testing.T) {
+	// A movie the player still reports as "playing" but which the caller has
+	// determined is paused (position not advancing): no timestamps, pause badge.
+	s := loadCandidates(t)[1].Session
+	s.Player.State = "playing"
+	a := Build(s, Extras{}, 1_000, true)
+	if a.Timestamps != nil {
+		t.Errorf("paused activity must have no timestamps: %+v", a.Timestamps)
+	}
+	if a.Assets.SmallImage != AssetPause || a.Assets.SmallText != "Paused on Plex for Android (TV)" {
+		t.Errorf("small %+v", a.Assets)
+	}
+}
+
 func TestBuildMovieAndTrack(t *testing.T) {
 	c := loadCandidates(t)
-	m := Build(c[1].Session, Extras{}, 5)
+	m := Build(c[1].Session, Extras{}, 5, false)
 	if m.Details != "Dune: Part Two" || m.State != "2024 · Science Fiction, Adventure · 2h 46m" {
 		t.Errorf("movie %q / %q", m.Details, m.State)
 	}
@@ -166,7 +180,7 @@ func TestBuildMovieAndTrack(t *testing.T) {
 		t.Errorf("movie assets %+v", m.Assets)
 	}
 
-	tr := Build(c[2].Session, Extras{}, 5)
+	tr := Build(c[2].Session, Extras{}, 5, true)
 	if tr.Type != discord.TypeListening || tr.StatusDisplayType != discord.DisplayState {
 		t.Errorf("track type %d", tr.Type)
 	}
@@ -190,14 +204,14 @@ func TestClamp(t *testing.T) {
 
 func TestChanged(t *testing.T) {
 	s := loadCandidates(t)[0].Session
-	a := Build(s, Extras{}, 100_000)
-	if Changed(a, Build(s, Extras{}, 105_000)) {
+	a := Build(s, Extras{}, 100_000, false)
+	if Changed(a, Build(s, Extras{}, 105_000, false)) {
 		t.Error("5s jitter should not trigger an update")
 	}
-	if !Changed(a, Build(s, Extras{}, 200_000)) {
+	if !Changed(a, Build(s, Extras{}, 200_000, false)) {
 		t.Error("a seek should trigger an update")
 	}
-	if !Changed(a, Build(s, Extras{Poster: "https://x/y.jpg"}, 100_000)) {
+	if !Changed(a, Build(s, Extras{Poster: "https://x/y.jpg"}, 100_000, false)) {
 		t.Error("new artwork should trigger an update")
 	}
 	if !Changed(a, nil) || !Changed(nil, a) || Changed(nil, nil) {
@@ -208,26 +222,25 @@ func TestChanged(t *testing.T) {
 func TestTracker(t *testing.T) {
 	var tr Tracker
 	t0 := time.UnixMilli(1_000_000)
-	start, _ := tr.Observe("k", "playing", 60_000, t0)
-	if start != 940_000 {
-		t.Fatalf("start %d", start)
+	start, since := tr.Observe("k", 60_000, t0)
+	if start != 940_000 || since != 0 {
+		t.Fatalf("start %d since %v", start, since)
 	}
-	// Offset not reported again yet: keep the anchor.
-	if s, _ := tr.Observe("k", "playing", 60_000, t0.Add(4*time.Second)); s != start {
-		t.Errorf("anchor moved to %d", s)
+	// Position unchanged across polls: the anchor holds and sinceMove grows.
+	if s, since := tr.Observe("k", 60_000, t0.Add(4*time.Second)); s != start || since != 4*time.Second {
+		t.Errorf("anchor %d since %v", s, since)
 	}
-	// Pause and stay paused.
-	tr.Observe("k", "paused", 70_000, t0.Add(10*time.Second))
-	if _, p := tr.Observe("k", "paused", 70_000, t0.Add(70*time.Second)); p != time.Minute {
-		t.Errorf("paused for %v", p)
+	// Position advances: sinceMove resets and the anchor stays put (same rate).
+	if s, since := tr.Observe("k", 69_000, t0.Add(9*time.Second)); s != start || since != 0 {
+		t.Errorf("advancing: anchor %d since %v", s, since)
 	}
-	// Resume resets the pause timer.
-	if _, p := tr.Observe("k", "playing", 70_000, t0.Add(80*time.Second)); p != 0 {
-		t.Errorf("paused after resume: %v", p)
+	// Frozen position (a pause, however the player reports its state).
+	if _, since := tr.Observe("k", 69_000, t0.Add(9*time.Second+time.Minute)); since != time.Minute {
+		t.Errorf("frozen since %v", since)
 	}
 	// New item starts fresh.
-	if s, _ := tr.Observe("other", "playing", 0, t0); s != 1_000_000 {
-		t.Errorf("new item start %d", s)
+	if s, since := tr.Observe("other", 0, t0); s != 1_000_000 || since != 0 {
+		t.Errorf("new item start %d since %v", s, since)
 	}
 }
 

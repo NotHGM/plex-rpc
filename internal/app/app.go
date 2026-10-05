@@ -22,6 +22,11 @@ import (
 // Discord allows 5 activity updates per 20 seconds.
 const minUpdateGap = 4 * time.Second
 
+// freezeGrace is how long the reported position may stand still before playback
+// is treated as paused. It is comfortably longer than any client's timeline
+// reporting interval, so normal playback is never mistaken for a pause.
+const freezeGrace = 12 * time.Second
+
 // State is a coarse status for the tray icon.
 type State int
 
@@ -266,14 +271,18 @@ func (a *App) tick(ctx context.Context) time.Duration {
 		a.lastKey = key
 	}
 
-	start, pausedFor := a.tracker.Observe(key, pick.Session.Player.State, int64(pick.Session.ViewOffset), time.Now())
-	paused := pick.Session.Player.State == "paused"
+	start, sinceMove := a.tracker.Observe(key, int64(pick.Session.ViewOffset), time.Now())
+	// A session is paused when the player says so, or when its position has
+	// stopped advancing. The latter also catches players that keep reporting
+	// their state as "playing" while actually paused, which would otherwise
+	// leave the Discord progress bar running ahead of the real position.
+	paused := pick.Session.Player.State == "paused" || sinceMove >= freezeGrace
 	hide := paused && cfg.ClearAfterPauseMinutes >= 0 &&
-		pausedFor >= time.Duration(cfg.ClearAfterPauseMinutes)*time.Minute
+		sinceMove >= time.Duration(cfg.ClearAfterPauseMinutes)*time.Minute
 
 	var next *discord.Activity
 	if !hide {
-		next = presence.Build(pick.Session, a.extrasFor(ctx, *pick, cfg, token), start)
+		next = presence.Build(pick.Session, a.extrasFor(ctx, *pick, cfg, token), start, paused)
 	}
 	a.push(next)
 

@@ -32,8 +32,10 @@ func Key(c Candidate) string {
 }
 
 // Build converts a session into an activity. start is when playback would
-// have begun at normal speed (Unix ms), used for the progress bar.
-func Build(s plex.Session, ex Extras, start int64) *discord.Activity {
+// have begun at normal speed (Unix ms), used for the progress bar. paused is
+// the effective paused state (the player may report "playing" while paused, so
+// the caller decides this from whether the position is advancing).
+func Build(s plex.Session, ex Extras, start int64, paused bool) *discord.Activity {
 	a := &discord.Activity{Type: discord.TypeWatching, StatusDisplayType: discord.DisplayDetails}
 	large := ""
 	switch s.Type {
@@ -69,7 +71,6 @@ func Build(s plex.Session, ex Extras, start int64) *discord.Activity {
 	if assets.LargeImage == "" {
 		assets.LargeImage = AssetLogo
 	}
-	paused := s.Player.State == "paused"
 	if paused {
 		assets.SmallImage, assets.SmallText = AssetPause, "Paused"
 	} else {
