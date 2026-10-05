@@ -72,7 +72,6 @@ type App struct {
 	servers    []plex.Server
 	failures   int
 	tracker    presence.Tracker
-	liveness   presence.Liveness
 	sent       *discord.Activity
 	synced     bool
 	sentAt     time.Time
@@ -80,6 +79,7 @@ type App struct {
 	lastKey    string
 	ignored    map[string]bool
 	ghosts     map[string]bool
+	hosted     bool
 	localIPs   map[string]bool
 	localIPsAt time.Time
 
@@ -102,6 +102,10 @@ func New(store *config.Store, version, defaultClientID string, cacheDir string) 
 		status:          Status{State: StateStarting, Text: "Starting…"},
 	}
 }
+
+// SetHosted marks the engine as running inside the Plex process (the mod), so
+// it skips the "is Plex running?" ghost check. Call before Run.
+func (a *App) SetHosted(v bool) { a.hosted = v }
 
 // OnStatus registers a callback for status changes. It is called from the
 // loop goroutine.
@@ -570,28 +574,25 @@ func (a *App) logIgnored(cands []presence.Candidate, f presence.Filter) {
 // server: playing but frozen for presence.StaleAfter, or reported by this PC
 // while no Plex app is running here.
 func (a *App) dropGhosts(cands []presence.Candidate, f presence.Filter) []presence.Candidate {
-	now := time.Now()
+	// Running inside Plex (the mod): the player is obviously present, and the
+	// "is Plex running?" check would misfire because this process is Plex.
+	if a.hosted {
+		return cands
+	}
 	appChecked, appRunning := false, true
 	out := cands[:0:0]
 	for _, c := range cands {
-		key := presence.Key(c)
-		s := c.Session
-		if a.liveness.Stale(key, s.Player.State, int64(s.ViewOffset), now) {
-			a.logGhost(key, c, "position has not moved")
-			continue
-		}
-		if f.Match(c) && f.OnThisPC(s.Player) {
+		if f.Match(c) && f.OnThisPC(c.Session.Player) {
 			if !appChecked {
 				appChecked, appRunning = true, sysutil.PlexAppRunning()
 			}
 			if !appRunning {
-				a.logGhost(key, c, "the Plex app is not running")
+				a.logGhost(presence.Key(c), c, "the Plex app is not running")
 				continue
 			}
 		}
 		out = append(out, c)
 	}
-	a.liveness.Prune(now.Add(-10 * time.Minute))
 	return out
 }
 

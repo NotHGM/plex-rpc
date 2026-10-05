@@ -19,10 +19,12 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/NotHGM/plex-rpc/internal/app"
 	"github.com/NotHGM/plex-rpc/internal/config"
+	"github.com/NotHGM/plex-rpc/internal/sysutil"
 )
 
 // Set with -ldflags "-X main.version=... -X main.defaultClientID=...".
@@ -42,7 +44,17 @@ func PlexRpcStart() {
 	mu.Lock()
 	defer mu.Unlock()
 	if cancel != nil {
-		return // already running
+		return // already running in this process
+	}
+	// Plex launches several processes (its Qt helpers), and each one loads this
+	// proxy. Run the engine in the main Plex process only, and let a named
+	// mutex guarantee a single engine across all of them — otherwise several
+	// engines would fight over the Discord presence.
+	if skipHostProcess() {
+		return
+	}
+	if !sysutil.SingleInstance() {
+		return
 	}
 	dir, err := config.Dir()
 	if err != nil {
@@ -59,6 +71,7 @@ func PlexRpcStart() {
 	ctx, c := context.WithCancel(context.Background())
 	cancel = c
 	a := app.New(store, version+" (mod)", defaultClientID, dir)
+	a.SetHosted(true)
 	if tok, _ := store.Token(); tok == "" {
 		a.SignIn(ctx)
 	}
@@ -95,6 +108,22 @@ func openLog(dir string) {
 	logFile = f
 	log.SetOutput(io.Writer(f))
 	log.SetFlags(log.LstdFlags)
+}
+
+// skipHostProcess reports whether this process is one of Plex's helper
+// processes rather than the main app, so the engine does not start there.
+func skipHostProcess() bool {
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	base := strings.ToLower(filepath.Base(exe))
+	for _, h := range []string{"qtwebengineprocess", "crashpad_handler", "plexmediaserver"} {
+		if strings.Contains(base, h) {
+			return true
+		}
+	}
+	return false
 }
 
 func main() {}
