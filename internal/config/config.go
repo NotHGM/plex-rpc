@@ -87,6 +87,9 @@ type Config struct {
 	PollIntervalSeconds int `json:"poll_interval_seconds"`
 	// Disabled hides the presence without quitting (tray "Pause presence").
 	Disabled bool `json:"disabled"`
+	// Debug logs one line per poll describing the chosen session, for
+	// troubleshooting. Off by default.
+	Debug bool `json:"debug"`
 }
 
 func defaults() Config {

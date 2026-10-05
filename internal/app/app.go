@@ -284,6 +284,19 @@ func (a *App) tick(ctx context.Context) time.Duration {
 	hide := paused && cfg.ClearAfterPauseMinutes >= 0 &&
 		sinceMove >= time.Duration(cfg.ClearAfterPauseMinutes)*time.Minute
 
+	if cfg.Debug {
+		matches := 0
+		for _, c := range cands {
+			if filter.Match(c) {
+				matches++
+			}
+		}
+		p := pick.Session.Player
+		log.Printf("debug: pick=%q type=%s playerState=%s offset=%dms dur=%dms sinceMove=%s paused=%v hide=%v cands=%d matches=%d device=%q@%s",
+			title(pick.Session), pick.Session.Type, p.State, int64(pick.Session.ViewOffset), int64(pick.Session.Duration),
+			sinceMove.Round(time.Second), paused, hide, len(cands), matches, p.Title, p.Address)
+	}
+
 	var next *discord.Activity
 	if !hide {
 		next = presence.Build(pick.Session, a.extrasFor(ctx, *pick, cfg, token), start, paused)
