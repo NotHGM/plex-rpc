@@ -9,3 +9,6 @@
 
 # local tooling
 .helm/
+
+# mod build output
+mod/dist/

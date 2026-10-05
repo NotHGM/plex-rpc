@@ -4,7 +4,7 @@
   <p>Discord Rich Presence for the Plex desktop app on Windows.</p>
   <p>
     <a href="https://github.com/NotHGM/plex-rpc/releases/latest"><b>Download</b></a> ·
-    <a href="#setup">Setup</a> ·
+    <a href="#install">Install</a> ·
     <a href="#settings">Settings</a> ·
     <a href="#troubleshooting">Troubleshooting</a>
   </p>
@@ -33,18 +33,45 @@ Plex RPC sits in your system tray and shows what you're playing in Plex on your 
 - **You choose what counts.** By default only your account on this PC is shared. Tick your PS5, TV or phone under **Devices**, and your Plex Home users under **Accounts**. Friends streaming from your server are never shown.
 - **Sign in with Plex** in your browser. No token copying, no server address to type.
 - **Tray app** with a pause switch, device and account pickers, per-media toggles and *Start with Windows*.
-- A single small `.exe` with no installer and no runtime to install.
+- **Two ways to run it** — a small tray app, or an [in-app mod](#option-2--in-app-mod) that lives inside Plex so nothing extra runs.
+- No installer and no runtime to install.
 
-## Setup
+## Install
+
+There are two ways to run Plex RPC. Both do the same thing — pick whichever you prefer.
+
+| | **App** (recommended) | **In-app mod** |
+| --- | --- | --- |
+| What it is | A small program in your system tray | Two files dropped next to Plex |
+| Extra program running | Yes (a tray icon) | No — it runs inside Plex |
+| Install | Run the `.exe` | Copy two files into the Plex folder |
+| Start / stop | With Windows, or manually | Automatically with Plex |
+| Best for | Most people | People who don't want a separate program |
+
+Whichever you pick, the **Discord desktop app must be running** — the web version can't show Rich Presence — and you sign in to Plex once in your browser.
+
+### Option 1 — App (recommended)
 
 1. Download `plex-rpc-windows-amd64.exe` from the [latest release](https://github.com/NotHGM/plex-rpc/releases/latest). Use the `arm64` build on Snapdragon PCs.
 2. Put it somewhere permanent, for example `%LOCALAPPDATA%\Programs\Plex RPC\`, and run it.
 3. Your browser opens the Plex sign-in page. Approve **Plex RPC**.
 4. Right-click the tray icon and tick **Start with Windows**.
 
-Play something in Plex and check your Discord profile. Discord must be running as the desktop app. The web version can't receive Rich Presence.
+Play something in Plex and check your Discord profile.
 
 > Windows SmartScreen may warn about an unrecognised app the first time because the exe isn't code-signed. Click **More info → Run anyway**. You can also [build it yourself](#building-from-source).
+
+### Option 2 — In-app mod
+
+Runs inside the Plex desktop app, so there's no separate program. It's two files that sit next to `Plex.exe`; Plex loads them when it starts and they stop when Plex closes.
+
+1. Download `plex-rpc-mod-windows-amd64.zip` from the [latest release](https://github.com/NotHGM/plex-rpc/releases/latest) and unzip it.
+2. Quit Plex completely, including from the system tray.
+3. Open your Plex program folder (right-click the Plex shortcut → **Open file location**, usually `C:\Program Files\Plex\Plex\`).
+4. Copy **both** `version.dll` and `plexrpc_core.dll` into that folder.
+5. Start Plex and approve the one-time Plex sign-in in your browser.
+
+To remove it, quit Plex and delete those two files. Full details, including antivirus notes, are in [`mod/README.md`](mod/README.md). Use the app **or** the mod, not both at once. The mod is x64 only for now.
 
 ## How it works
 
@@ -163,6 +190,16 @@ On Windows PowerShell, set the variables first with `$env:GOOS="windows"; $env:G
 - `go run ./cmd/plex-rpc -headless` runs without the tray and logs to the console. This works on Linux too.
 - `go run ./tools/genicon` regenerates every icon and Discord asset from code.
 
+### Building the in-app mod
+
+The mod shares the same engine, built as a DLL. It needs an [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (or mingw-w64) cross toolchain on `PATH` in addition to Go:
+
+```sh
+DISCORD_CLIENT_ID=<your app id> mod/build.sh v0.3.0
+```
+
+This writes `version.dll` and `plexrpc_core.dll` to `mod/dist/`. See [`mod/README.md`](mod/README.md) for how it works.
+
 ### Project layout
 
 ```
@@ -174,6 +211,8 @@ internal/presence   session filtering, activity text, change detection
 internal/artwork    public poster lookup and caching
 internal/tray       system tray menu
 internal/sysutil    autostart, browser, local IPs
+mod/core            engine built as a DLL (plexrpc_core.dll)
+mod/proxy           version.dll proxy that loads the engine inside Plex
 ```
 
 ## License
