@@ -251,7 +251,7 @@ func (a *App) tick(ctx context.Context) time.Duration {
 	filter := a.filter(cfg)
 	a.rememberDevices(cands, filter)
 	a.logIgnored(cands, filter)
-	pick := presence.Pick(a.dropGhosts(cands, filter), filter)
+	pick := presence.Pick(presence.DedupeByDevice(a.dropGhosts(cands, filter)), filter)
 
 	serverNames := make([]string, len(a.servers))
 	for i, s := range a.servers {
@@ -292,8 +292,8 @@ func (a *App) tick(ctx context.Context) time.Duration {
 			}
 		}
 		p := pick.Session.Player
-		log.Printf("debug: pick=%q type=%s playerState=%s offset=%dms dur=%dms sinceMove=%s paused=%v hide=%v cands=%d matches=%d device=%q@%s",
-			title(pick.Session), pick.Session.Type, p.State, int64(pick.Session.ViewOffset), int64(pick.Session.Duration),
+		log.Printf("debug: pick=%q sessionKey=%s type=%s playerState=%s offset=%dms dur=%dms sinceMove=%s paused=%v hide=%v cands=%d matches=%d device=%q@%s",
+			title(pick.Session), pick.Session.SessionKey, pick.Session.Type, p.State, int64(pick.Session.ViewOffset), int64(pick.Session.Duration),
 			sinceMove.Round(time.Second), paused, hide, len(cands), matches, p.Title, p.Address)
 	}
 

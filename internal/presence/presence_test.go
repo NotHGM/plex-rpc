@@ -243,3 +243,38 @@ func TestTracker(t *testing.T) {
 		t.Errorf("new item start %d since %v", s, since)
 	}
 }
+
+func TestDedupeByDevice(t *testing.T) {
+	srv := plex.Server{MachineID: "srv", Owned: true}
+	mk := func(sessionKey, title, state string, dev string) Candidate {
+		var s plex.Session
+		s.Type = "episode"
+		s.SessionKey = sessionKey
+		s.GrandparentTitle = title
+		s.Player = plex.Player{State: state, MachineIdentifier: dev, Title: "Amos-PC"}
+		return Candidate{Server: srv, Session: s}
+	}
+	// Same device: a stale "playing" Mentalist (older key) plus the real paused
+	// Counterpart (newer key). Only the newest survives.
+	cands := []Candidate{
+		mk("3", "The Mentalist", "playing", "amos"),
+		mk("9", "Counterpart", "paused", "amos"),
+	}
+	got := DedupeByDevice(cands)
+	if len(got) != 1 || got[0].Session.GrandparentTitle != "Counterpart" || got[0].Session.Player.State != "paused" {
+		t.Fatalf("expected newest (paused Counterpart), got %+v", got)
+	}
+
+	// A second, different device is kept separately.
+	cands = append(cands, mk("1", "Dune", "playing", "tv"))
+	got = DedupeByDevice(cands)
+	if len(got) != 2 {
+		t.Fatalf("two devices should yield two sessions, got %d", len(got))
+	}
+
+	// Sessions with no device id are never collapsed.
+	none := []Candidate{mk("1", "A", "playing", ""), mk("2", "B", "playing", "")}
+	if len(DedupeByDevice(none)) != 2 {
+		t.Fatal("empty device ids must not be merged")
+	}
+}
