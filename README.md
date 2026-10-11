@@ -31,6 +31,7 @@ Plex RPC sits in your system tray and shows what you're playing in Plex on your 
 - **Real posters.** Artwork comes from Plex's public metadata service, so your server is never exposed. Music falls back to iTunes cover art.
 - **Progress bar** that stays in sync when you pause, seek or skip.
 - **You choose what counts.** By default only your account on this PC is shared. Tick your PS5, TV or phone under **Devices**, and your Plex Home users under **Accounts**. Friends streaming from your server are never shown.
+- **Works on friends' servers too.** Watching from a server someone shared with you is shown just like your own.
 - **Sign in with Plex** in your browser. No token copying, no server address to type.
 - **Tray app** with a pause switch, device and account pickers, per-media toggles and *Start with Windows*.
 - **Two ways to run it** — a small tray app, or an [in-app mod](#option-2--in-app-mod) that lives inside Plex so nothing extra runs.
@@ -81,7 +82,11 @@ The Plex desktop app has no local API. It does, however, report playback to your
  Plex for Windows ──timeline──▶ Plex Media Server ◀──/status/sessions── Plex RPC ──IPC──▶ Discord
 ```
 
-Because of this, Plex RPC needs to be signed in to the account that **owns** the server. Only the owner can read the session list.
+Only a server's owner can read its session list, so this covers servers you own.
+
+### Servers shared with you
+
+For a server a friend has shared with you, Plex RPC can't see the sessions. Instead it reads what the Plex app on this PC is playing from the app's own log (`%LOCALAPPDATA%\Plex\Logs\Plex.log`), which records the item and position every few seconds, and looks the item up on the shared server for its title and poster. This only works for playback on this PC, and only while *This PC* is ticked under **Devices**.
 
 ### Devices and accounts
 
@@ -138,6 +143,7 @@ Look for a line starting with `ignoring` in the log. It lists the user, player n
 - If the player is a different device, tick it under **Devices**, or tick **All devices**.
 - If it's this PC but wasn't recognised (some Docker or VPN setups hide the real address), also enable that option. Your phone and TV will show up too.
 - If the user is one of your Plex Home users, tick them under **Accounts**. Otherwise sign in with the account that owns the server.
+- If you're watching from a friend's server, the log should say `using server "..." (shared with you)`. Playback from it is only picked up from the Plex app on this PC.
 
 **It still shows a movie after I closed Plex.**
 If you close the app mid-playback, it never tells the server it stopped, so the server keeps listing the session as playing for a while. Plex RPC notices when the position stops moving, or when no Plex app is running on this PC, and clears the status within about 30 seconds.
@@ -159,7 +165,7 @@ Discord hides presence buttons from yourself. Ask a friend or check from another
 Plex RPC only talks to:
 
 - **plex.tv**, to sign in and find your servers
-- **your Plex Media Server**, to read sessions
+- **your Plex Media Server**, to read sessions, and **servers shared with you**, to look up the item you're playing
 - **metadata.provider.plex.tv**, to look up public poster URLs
 - **itunes.apple.com**, to search album art for music
 - **litterbox.catbox.moe**, only if you enable artwork uploads
@@ -206,6 +212,7 @@ This writes `version.dll` and `plexrpc_core.dll` to `mod/dist/`. See [`mod/READM
 cmd/plex-rpc        entry point, single-instance guard, logging
 internal/app        polling loop, sign-in, status
 internal/plex       plex.tv + Plex Media Server API
+internal/plexapp    what the Plex app on this PC is playing, from its log
 internal/discord    Discord IPC client (handshake, SET_ACTIVITY)
 internal/presence   session filtering, activity text, change detection
 internal/artwork    public poster lookup and caching

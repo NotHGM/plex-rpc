@@ -35,9 +35,10 @@ type connection struct {
 	Relay bool   `json:"relay"`
 }
 
-// OwnedServers lists the servers owned by the account and picks a working
-// connection for each one, preferring local, direct connections.
-func (c *Client) OwnedServers(ctx context.Context, token string) ([]Server, error) {
+// Servers lists the servers the account owns or has been given access to by
+// a friend, and picks a working connection for each one, preferring local,
+// direct connections. Shared servers come with their own access token.
+func (c *Client) Servers(ctx context.Context, token string) ([]Server, error) {
 	var res []resource
 	url := "https://clients.plex.tv/api/v2/resources?includeHttps=1&includeRelay=1"
 	if err := c.doJSON(ctx, http.MethodGet, url, token, &res); err != nil {
@@ -49,7 +50,7 @@ func (c *Client) OwnedServers(ctx context.Context, token string) ([]Server, erro
 		servers []Server
 	)
 	for _, r := range res {
-		if !r.Owned || !slices.Contains(strings.Split(r.Provides, ","), "server") {
+		if !slices.Contains(strings.Split(r.Provides, ","), "server") {
 			continue
 		}
 		wg.Add(1)
@@ -64,14 +65,23 @@ func (c *Client) OwnedServers(ctx context.Context, token string) ([]Server, erro
 				return
 			}
 			mu.Lock()
-			servers = append(servers, Server{Name: r.Name, MachineID: r.ClientIdentifier, URI: uri, Token: tok, Owned: true})
+			servers = append(servers, Server{Name: r.Name, MachineID: r.ClientIdentifier, URI: uri, Token: tok, Owned: r.Owned})
 			mu.Unlock()
 		}(r)
 	}
 	wg.Wait()
-	slices.SortFunc(servers, func(a, b Server) int { return strings.Compare(a.Name, b.Name) })
+	// Owned servers first, then by name.
+	slices.SortFunc(servers, func(a, b Server) int {
+		if a.Owned != b.Owned {
+			if a.Owned {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
 	if len(servers) == 0 {
-		return nil, errors.New("no reachable Plex Media Server owned by this account")
+		return nil, errors.New("no reachable Plex Media Server for this account")
 	}
 	return servers, nil
 }

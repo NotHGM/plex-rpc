@@ -15,6 +15,7 @@ import (
 	"github.com/NotHGM/plex-rpc/internal/config"
 	"github.com/NotHGM/plex-rpc/internal/discord"
 	"github.com/NotHGM/plex-rpc/internal/plex"
+	"github.com/NotHGM/plex-rpc/internal/plexapp"
 	"github.com/NotHGM/plex-rpc/internal/presence"
 	"github.com/NotHGM/plex-rpc/internal/sysutil"
 )
@@ -82,6 +83,9 @@ type App struct {
 	hosted     bool
 	localIPs   map[string]bool
 	localIPsAt time.Time
+	appLog     plexapp.Reader
+	appLogErr  string
+	shared     sharedItem
 
 	extrasMu sync.Mutex
 	extras   map[string]*presence.Extras // nil value = lookup in progress
@@ -97,6 +101,7 @@ func New(store *config.Store, version, defaultClientID string, cacheDir string) 
 		defaultClientID: defaultClientID,
 		wake:            make(chan struct{}, 1),
 		ignored:         map[string]bool{},
+		appLog:          plexapp.Reader{Path: plexapp.LogPath()},
 		extras:          map[string]*presence.Extras{},
 		synced:          true,
 		status:          Status{State: StateStarting, Text: "Starting…"},
@@ -234,7 +239,11 @@ func (a *App) tick(ctx context.Context) time.Duration {
 		}
 		a.servers, a.failures = servers, 0
 		for _, s := range servers {
-			log.Printf("plex: using server %q at %s", s.Name, s.URI)
+			if s.Owned {
+				log.Printf("plex: using server %q at %s", s.Name, s.URI)
+			} else {
+				log.Printf("plex: using server %q at %s (shared with you)", s.Name, s.URI)
+			}
 		}
 		a.refreshAccounts(ctx, token)
 	}
@@ -249,6 +258,9 @@ func (a *App) tick(ctx context.Context) time.Duration {
 	a.failures = 0
 
 	filter := a.filter(cfg)
+	if c := a.fromPlexApp(ctx, cfg, cands, filter); c != nil {
+		cands = append(cands, *c)
+	}
 	a.rememberDevices(cands, filter)
 	a.logIgnored(cands, filter)
 	pick := presence.Pick(presence.DedupeByDevice(a.dropGhosts(cands, filter)), filter)
@@ -400,7 +412,7 @@ func (a *App) discover(ctx context.Context, cfg config.Config, token string) ([]
 		}
 		return []plex.Server{s}, nil
 	}
-	return a.plex.OwnedServers(ctx, token)
+	return a.plex.Servers(ctx, token)
 }
 
 func (a *App) poll(ctx context.Context) ([]presence.Candidate, bool) {
@@ -411,8 +423,15 @@ func (a *App) poll(ctx context.Context) ([]presence.Candidate, bool) {
 		wg    sync.WaitGroup
 		cands []presence.Candidate
 		okAny bool
+		owned int
 	)
+	// Only the owner can list a server's sessions. Playback from shared
+	// servers is found through the Plex app instead (fromPlexApp).
 	for _, srv := range a.servers {
+		if !srv.Owned {
+			continue
+		}
+		owned++
 		wg.Add(1)
 		go func(srv plex.Server) {
 			defer wg.Done()
@@ -430,7 +449,7 @@ func (a *App) poll(ctx context.Context) ([]presence.Candidate, bool) {
 		}(srv)
 	}
 	wg.Wait()
-	return cands, okAny
+	return cands, okAny || owned == 0
 }
 
 func (a *App) filter(cfg config.Config) presence.Filter {
