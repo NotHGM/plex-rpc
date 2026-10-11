@@ -41,6 +41,12 @@ func writeTimeline(t *testing.T, path, state string, at time.Time, pos int64) {
 	if err := os.WriteFile(path, []byte(entry), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// Give the file the entry's own time, mirroring a real log whose mtime
+	// advances with each line. (Rewrites here can be the same size, which on
+	// some filesystems share an mtime tick and would hide the change.)
+	if err := os.Chtimes(path, at, at); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestFromPlexAppSharedServer(t *testing.T) {
