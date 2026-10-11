@@ -106,6 +106,31 @@ func (c *Client) Sessions(ctx context.Context, srv Server) ([]Session, error) {
 	return r.MediaContainer.Metadata, nil
 }
 
+// Item fetches a library item in the same shape as a session, without the
+// player and user blocks. It is used for playback the server does not list
+// to us, such as on a server a friend has shared.
+func (c *Client) Item(ctx context.Context, srv Server, ratingKey string) (*Session, error) {
+	var r struct {
+		MediaContainer struct {
+			Metadata []struct {
+				Session
+				// Items carry a "Guid" array next to the "guid" string. Without
+				// this field it would be decoded into Session.GUID, as JSON
+				// field matching ignores case.
+				Guids json.RawMessage `json:"Guid"`
+			} `json:"Metadata"`
+		} `json:"MediaContainer"`
+	}
+	u := srv.URI + "/library/metadata/" + url.PathEscape(ratingKey)
+	if err := c.doJSON(ctx, http.MethodGet, u, srv.Token, &r); err != nil {
+		return nil, err
+	}
+	if len(r.MediaContainer.Metadata) == 0 {
+		return nil, ErrNotFound
+	}
+	return &r.MediaContainer.Metadata[0].Session, nil
+}
+
 // Metadata is the subset of /library/metadata/{id} plex-rpc needs.
 type Metadata struct {
 	RatingKey string `json:"ratingKey"`
